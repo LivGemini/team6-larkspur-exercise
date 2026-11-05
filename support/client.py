@@ -58,7 +58,7 @@ def load_dotenv(path: Optional[str] = None) -> None:
     if _DOTENV_LOADED or not os.path.exists(path):
         _DOTENV_LOADED = True
         return
-    with open(path) as handle:
+    with open(path, encoding="utf-8", errors="replace") as handle:
         for raw in handle:
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -133,6 +133,19 @@ class MissingCredential(RuntimeError):
     pass
 
 
+def _retries() -> int:
+    """How many times the SDK retries a 429 or a 5xx before giving up.
+
+    A cohort can share one key, so every laptop benching at the same minute turns
+    rate limits into ordinary weather. The SDK's default of 2 gave up inside a
+    couple of seconds; 5 backs off for around fifteen (and honours Retry-After),
+    which is long enough to ride out a burst. ANTHROPIC_MAX_RETRIES overrides."""
+    try:
+        return max(0, int(os.environ.get("ANTHROPIC_MAX_RETRIES", "5")))
+    except ValueError:
+        return 5
+
+
 def get_client(offline: Optional[bool] = None):
     """Return a Claude client. Raises MissingCredential with a fix, never a stack trace."""
     load_dotenv()
@@ -165,9 +178,9 @@ def get_client(offline: Optional[bool] = None):
                 "  Fix: export AWS_REGION=us-east-1  (use the region your models are enabled in)"
             )
         from anthropic import AnthropicBedrock
-        return AnthropicBedrock(aws_region=os.environ["AWS_REGION"])
+        return AnthropicBedrock(aws_region=os.environ["AWS_REGION"], max_retries=_retries())
 
     # Everything else, including "unknown". A bare client resolves an OAuth
     # profile, a bearer token, or federated credentials on its own; if there is
     # genuinely nothing, the request fails with an auth error we can explain.
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(max_retries=_retries())

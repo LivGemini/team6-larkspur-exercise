@@ -128,6 +128,16 @@ class StepFailure(Exception):
     pass
 
 
+class AccessFailure(StepFailure):
+    """The run never reached Claude: no key, a refused key, no network. A fault
+    in this seat, not in the agent, so it carries its own words and the checks
+    that did not need Claude, instead of a hint about the loop."""
+
+    def __init__(self, text: str, checks=None):
+        super().__init__(text)
+        self.checks = list(checks or [])
+
+
 def normalize_name(name: str) -> str:
     """Trim, collapse spaces, lowercase, and drop accents. The site folds the
     same way, so "Céline" mints one code however the accent was typed."""
@@ -240,7 +250,14 @@ def call_agent(fn: Callable, *args, **kwargs):
     out of sys.modules because load_agent() above purges and re-imports the
     package on every gate.
     """
-    result = fn(*args, **kwargs)
+    try:
+        result = fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001: sorted into "this seat" or "your agent"
+        from support.access import explain
+        text = explain(exc)
+        if text is None:
+            raise
+        raise AccessFailure(text) from exc
     support = sys.modules.get("support")
     tracer = getattr(getattr(support, "LAST", None), "tracer", None)
     return result, tracer
@@ -283,6 +300,9 @@ def step_2(args) -> List[Check]:
         try:
             _text, tracer = call_agent(agent.run_agent, "K7PQ2M", "Marchetti",
                                         "My flight was disrupted. What happens next?")
+        except AccessFailure as exc:
+            exc.checks = checks      # what was settled without Claude still counts
+            raise
         except Exception as exc:  # noqa: BLE001: the loop, not the schemas
             raise StepFailure(
                 "this gate runs a conversation before it can read any results, and that "
@@ -351,6 +371,8 @@ def step_3(args) -> List[Check]:
     try:
         result, tracer = call_agent(agent.run_agent, "K7PQ2M", "Marchetti",
                                      "My flight was disrupted. What happens next?")
+    except AccessFailure:
+        raise
     except Exception as exc:  # noqa: BLE001: the API's verdict, handed over whole
         raise StepFailure(
             "the run stopped on an error instead of an answer:\n\n      %s: %s\n\n"
@@ -413,6 +435,8 @@ def step_4(args) -> List[Check]:
                 agent.run_agent, task["pnr"], task["last_name"],
                 "My flight was disrupted. Can you help me figure out what happens next?",
             )
+        except AccessFailure:
+            raise                    # five identical failures say nothing the first did not
         except Exception as exc:  # noqa: BLE001: surfaced per-ticket, not fatal to the run
             checks.append(Check(False, "%s (%s) ran without an exception" % (task["pnr"], task["shape"]),
                                  hint="%s: %s" % (type(exc).__name__, exc)))
@@ -893,7 +917,11 @@ def step_7(args) -> List[Check]:
     # three in a row is.
     attempts, called_new, tracer, result = 3, [], None, ""
     for _attempt in range(attempts):
-        result, tracer = call_agent(agent.run_agent, pnr, last, msg)
+        try:
+            result, tracer = call_agent(agent.run_agent, pnr, last, msg)
+        except AccessFailure as exc:
+            exc.checks = checks
+            raise
         called_new = [n for n in (tracer.tool_names if tracer else []) if n in new_names]
         if called_new:
             break
@@ -1050,7 +1078,11 @@ def step_2_2(args) -> List[Check]:
     # refusal is not evidence of a bad description.
     attempts, called, tracer, result = 3, [], None, ""
     for _attempt in range(attempts):
-        result, tracer = call_agent(agent.run_agent, pnr, last, msg)
+        try:
+            result, tracer = call_agent(agent.run_agent, pnr, last, msg)
+        except AccessFailure as exc:
+            exc.checks = checks
+            raise
         called = [n for n in (tracer.tool_names if tracer else []) if n in merged]
         if called:
             break
@@ -1188,6 +1220,18 @@ def run_step(raw: str, name: Optional[str]) -> int:
     print("\nStep %s: %s\n" % (number, STEP_NAMES.get(number, "Setup")))
     try:
         checks = STEPS[number](StepContext(name=name))
+    except AccessFailure as exc:
+        # Whatever was settled without Claude is still true, so say it first.
+        for c in exc.checks:
+            if c.passed:
+                print("  %s %s" % ("·" if c.note else "✓", c.label))
+        if any(c.passed and not c.note for c in exc.checks):
+            print("\n  (the lines above did not need Claude)")
+        print()
+        for line in str(exc).splitlines():
+            print("  " + line)
+        print("\n  Nothing saved: a code is only made from a run that happened.")
+        return 1
     except StepFailure as exc:
         print("  ✗ %s" % exc)
         return 1

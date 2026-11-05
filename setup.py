@@ -4,6 +4,8 @@
     python3 setup.py            # check this seat
     python3 setup.py --fix      # create .venv and install, then re-run
     python3 setup.py --no-live  # skip the live API call (faster re-runs)
+    python3 setup.py --key      # paste your key to Claude from the build site; it never shows
+    python3 setup.py --day0     # the laptop check before the session: no key, no team repo yet
 
 It checks one thing: that this laptop can do the build. Python, the SDK, a
 credential that actually works, git, and a real reach to the team repo. Run it
@@ -19,8 +21,10 @@ wrong for someone else too.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
+import re
 import platform
 import shutil
 import subprocess
@@ -32,7 +36,12 @@ sys.path.insert(0, HERE)
 RULE = "─" * 66
 MIN_PY = (3, 9)
 GOOD_PY = (3, 11)
-MODEL = "claude-sonnet-5"
+DAY0 = False   # set by main(): the "run this next" hints then stay in Day 0
+
+
+def again(extra=""):
+    """The command to run next, in the mode the person is in."""
+    return "python3 setup.py%s%s" % (" --day0" if DAY0 else "", extra)
 
 
 class Check:
@@ -93,7 +102,7 @@ def check_venv():
                      "advisory")
     return Check("venv", False, "running on system Python, no .venv here",
                  "Not blocking, as long as the SDK check below is green. If it is not:\n"
-                 "       python3 setup.py --fix\n"
+                 "       " + again(" --fix") + "\n"
                  "     creates .venv here and installs into it. Nothing touches your system\n"
                  "     Python, so no admin rights and no IT ticket.",
                  "advisory")
@@ -104,7 +113,7 @@ def check_sdk():
         import anthropic
     except ImportError:
         return Check("sdk", False, "anthropic SDK installed",
-                     "Fix: python3 setup.py --fix\n"
+                     "Fix: " + again(" --fix") + "\n"
                      "     or: python3 -m pip install -r requirements.txt")
     return Check("sdk", True, "anthropic SDK %s" % getattr(anthropic, "__version__", "?"))
 
@@ -166,29 +175,61 @@ def check_env_ignored():
     return Check("envleak", True, ".env is gitignored and never committed")
 
 
-def check_origin():
+def check_key_in_files():
+    """A key typed into agent.py (or any tracked file) goes out with the next
+    canon push. pod_sync.py refuses that push too; this says so earlier."""
+    try:
+        from support import keyscan
+    except Exception as exc:  # noqa: BLE001
+        return Check("keyleak", True, "no key in the repo's files (could not check: %s)" % exc,
+                     "", "advisory")
+    hits = keyscan.tracked(HERE)
+    if hits is None:
+        return Check("keyleak", True, "no key in the repo's files (skipped, git could not "
+                     "list them)", "", "advisory")
+    if not hits:
+        return Check("keyleak", True, "no key in the repo's files")
+    found = "\n".join("       " + keyscan.where(h) for h in hits[:10])
+    return Check("keyleak", False, "no key in the repo's files",
+                 "A key to Claude is in a file that goes to the team repo:\n%s\n"
+                 "     %s\n"
+                 "     Open the file and delete the key. The key belongs only in .env, which is\n"
+                 "     never pushed. If this key was already pushed, tell your facilitator now."
+                 % (found, keyscan.WHY.replace("\n", "\n     ")))
+
+
+PRACTICE_REPO = "https://github.com/victorsteeb/larkspur-exercise.git"
+
+
+def check_origin(day0=False):
     """A real reach for the team repo. This is the check that catches the
     corporate proxy that allows browsers and blocks git, which otherwise shows
-    up as a dead ten minutes in the first build."""
+    up as a dead ten minutes in the first build.
+
+    On Day 0 there is no team repo yet, so the same check runs against the
+    practice clone (the public template the team repo is made from): what it
+    proves, that git gets out to GitHub from this network, is the same."""
+    what = "GitHub" if day0 else "the team repo"
     code, url = _git("remote", "get-url", "origin", timeout=15)
     if code != 0:
-        return Check("origin", False, "git can reach the team repo",
-                     "This folder has no 'origin', so it is not a clone of the team repo.\n"
+        return Check("origin", False, "git can reach %s" % what,
+                     "This folder has no 'origin', so it is not a clone.\n"
                      "     Clone it, do not download the zip:\n"
-                     "       git clone <your team repo URL>")
+                     "       git clone %s" % (PRACTICE_REPO + " larkspur-check" if day0
+                                              else "<your team repo URL>"))
     code, out = _git("ls-remote", "--heads", "origin", timeout=30)
     if code == 0:
-        return Check("origin", True, "git can reach the team repo (%s)" % url)
+        return Check("origin", True, "git can reach %s (%s)" % (what, url))
     text = out.lower()
     if "authentication" in text or "could not read username" in text \
             or "permission denied" in text or "403" in text:
-        return Check("origin", False, "git can reach the team repo",
+        return Check("origin", False, "git can reach %s" % what,
                      "git got to the remote and was turned away. If the repo is private, "
                      "whoever\n     created it has to add you as a collaborator, and you have "
                      "to accept the invite.\n"
                      "     That is the usual answer, not your SSH key.\n"
                      "     https auth: `gh auth login`.  SSH: `ssh -T git@github.com`.")
-    return Check("origin", False, "git can reach the team repo",
+    return Check("origin", False, "git can reach %s" % what,
                  "%s\n"
                  "     git could not get to the remote at all. You clone and push on the day, "
                  "so this\n     has to work. In order:\n"
@@ -198,13 +239,54 @@ def check_origin():
                  % last_line(out))
 
 
-def check_claude_cli():
+def check_vscode():
+    """Optional: only people who want to work in VS Code need it. Never blocks READY.
+    The `code` command is often not on PATH even when the app is installed, so the
+    app itself is looked for too."""
+    home = os.path.expanduser("~")
+    candidates = [
+        "/Applications/Visual Studio Code.app", os.path.join(home, "Applications", "Visual Studio Code.app"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Microsoft VS Code", "Code.exe"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Microsoft VS Code", "Code.exe"),
+        "/usr/share/code/code", "/snap/bin/code", "/usr/bin/code",
+    ]
+    found = shutil.which("code") or next((c for c in candidates if c and os.path.exists(c)), None)
+    if found:
+        return Check("vscode", True, "VS Code found (%s)" % found, "", "advisory")
+    return Check("vscode", False, "VS Code not found",
+                 "Only needed if you want to work in VS Code. Skip this if you will use a\n"
+                 "     terminal or the Claude desktop app. To add it: https://code.visualstudio.com",
+                 "advisory")
+
+
+def check_gh():
+    """Only when the GitHub CLI is installed: is it signed in? Optional, because plain git
+    with a saved login does the same job. Only the exit code is used, so its output is
+    thrown away undecoded (gh prints symbols that a Windows code page cannot decode)."""
+    if not shutil.which("gh"):
+        return None
+    try:
+        r = subprocess.run(["gh", "auth", "status"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=10)
+        ok = r.returncode == 0
+    except subprocess.TimeoutExpired:
+        return Check("gh", False, "GitHub CLI did not answer",
+                     "Optional. If you use gh, run: gh auth status", "advisory")
+    except OSError:
+        ok = False
+    if ok:
+        return Check("gh", True, "GitHub CLI signed in", "", "advisory")
+    return Check("gh", False, "GitHub CLI installed but not signed in",
+                 "Optional. If you use gh, run: gh auth login", "advisory")
+
+
+def check_claude_cli(required=False):
     path = shutil.which("claude")
     if not path:
         return Check("claude", False, "Claude Code installed",
                      "The go-read step and /build both lean on it. Install:\n"
                      "       npm install -g @anthropic-ai/claude-code    (or see docs.claude.com)",
-                     "advisory")
+                     "required" if required else "advisory")
     return Check("claude", True, "Claude Code installed (%s)" % path)
 
 
@@ -263,15 +345,26 @@ def check_credential():
     return Check("credential", True, "credential: %s" % detail)
 
 
+# Where the key is on the build site. The site's own copy uses these words, so a
+# participant can match what the terminal says to what the page shows.
+SITE_KEY = ('the box "Your key to Claude" in Setting up, Part 3, '
+            'or Menu \u2192 Copy your key to Claude')
+
 NO_CREDENTIAL = (
-    "No credential reached the API. Pick whichever you already have:\n"
-    "       1. Already sign in to Claude? Use that, no API key needed:\n"
+    "No credential reached the API. In the workshop, use 1:\n"
+    "       1. Your key from the build site. Copy it from the box \"Your key to Claude\"\n"
+    "          in Setting up, Part 3, or Menu \u2192 Copy your key to Claude. Then run this\n"
+    "          in your own terminal and paste the key (nothing shows as you paste):\n"
+    "            python3 setup.py --key\n"
+    "          If the box says the key is not released yet, ask your facilitator.\n"
+    "       2. Already sign in to Claude? Use that, no API key needed:\n"
     "            brew install anthropics/tap/ant   (or see docs.claude.com for "
     "Linux/Windows)\n"
     "            ant auth login\n"
     "            ant auth status        # confirms which credential is active\n"
-    "       2. Have an API key? cp .env.example .env and paste it in\n"
-    "       3. Neither? Ask for one now. Every build calls the API."
+    "       3. Have your own API key? Run  python3 setup.py --key  and paste it\n"
+    "       4. On Bedrock? Set the two Bedrock lines in .env (see .env.example)\n"
+    "       5. None of these? Ask your facilitator now. Every build calls the API."
 )
 
 
@@ -288,17 +381,28 @@ def check_live_call():
                      "Skipped, because LARKSPUR_OFFLINE=1 is set. See the credential check "
                      "above:\n     unset it and run again. The live call is the only proof "
                      "that matters here.")
+    model = None
     try:
+        # The model the agent will run on, so READY proves that one works.
+        from support.models import latest
+        model = latest("sonnet", "LARKSPUR_MODEL")
         client = get_client()
         response = client.messages.create(
-            model=MODEL, max_tokens=8,
+            model=model, max_tokens=8,
             messages=[{"role": "user", "content": "Say OK"}],
         )
         text = "".join(getattr(b, "text", "") for b in response.content).strip()
-        return Check("live", True, "live call to Claude: %r" % (text or "(empty)"))
-    except MissingCredential as exc:
-        return Check("live", False, "live call to Claude", str(exc))
+        return Check("live", True, "live call to Claude (%s): %r" % (model, text or "(empty)"))
     except Exception as exc:  # noqa: BLE001
+        try:
+            from support.access import explain
+            plain = explain(exc)
+        except Exception:  # noqa: BLE001: the explainer must never hide the failure
+            plain = None
+        if plain:
+            return Check("live", False, "live call to Claude", plain)
+        if isinstance(exc, MissingCredential):
+            return Check("live", False, "live call to Claude", str(exc))
         name = type(exc).__name__
         if "resolve authentication" in str(exc).lower() or name == "AuthenticationError":
             hint = NO_CREDENTIAL
@@ -309,11 +413,11 @@ def check_live_call():
                                       "raise it before the day if it stays "
                                       "broken.",
                 "PermissionDeniedError": "That credential is valid but has no access to "
-                                         "%s." % MODEL,
+                                         "%s." % model,
                 "RateLimitError": "Rate limited, because everyone hit the API at once. Wait "
                                   "30s and run this again.",
                 "NotFoundError": "Model %s is not available on this credential or region."
-                                 % MODEL,
+                                 % model,
             }.get(name, "Paste this into Claude Code. It has the repo in context.")
         return Check("live", False, "live call to Claude", "%s: %s\n     %s" % (name, exc, hint))
 
@@ -322,19 +426,35 @@ def check_live_call():
 # orchestration
 # ---------------------------------------------------------------------------
 
-def run_checks(live=True):
+def run_checks(live=True, day0=False):
     """Dependency order: this laptop, then git, then the credential. The live
     call runs last and only when nothing above it is broken, so a run that is
-    going to fail anyway does not spend a token."""
+    going to fail anyway does not spend a token.
+
+    Day 0 (before the session) is the same laptop check with no key and no team
+    repo to ask for: GitHub reach is proved against the practice clone, VS Code and
+    the GitHub CLI are looked at (never blocking), and there is no live call."""
     checks = [check_python(), check_venv(), check_sdk(), check_writable(),
-              check_git_identity(), check_env_ignored(), check_origin(),
-              check_claude_cli(), check_mcp_seam(), check_credential()]
-    if live and all(c.ok for c in checks if c.severity == "required"):
+              check_git_identity(), check_env_ignored(), check_key_in_files(), check_origin(day0),
+              check_claude_cli(required=day0)]
+    if day0:
+        checks += [check_vscode(), check_gh(), check_mcp_seam(),
+                   Check("credential", True, "no key needed yet: you copy your key to Claude "
+                         "from the build site at the session", "", "advisory")]
+        return [c for c in checks if c is not None]
+    checks += [check_mcp_seam(), check_credential()]
+    # The live call only needs Python and the SDK (an unactivated or missing .venv is
+    # advisory and must not skip it, or READY would print with no proof of a credential).
+    # A git problem used to
+    # hold it back, so a person with both a git fault and no key met the key
+    # problem for the first time at gate 1.2. It costs eight tokens: ask now.
+    can_call = all(c.ok for c in checks if c.id in ("python", "sdk"))
+    if live and can_call:
         checks.append(check_live_call())
     return checks
 
 
-def do_fix():
+def do_fix(day0=False):
     venv = os.path.join(HERE, ".venv")
     python = os.path.join(venv, "Scripts" if os.name == "nt" else "bin", "python")
     if not os.path.exists(python):
@@ -353,9 +473,82 @@ def do_fix():
         print("  %s -m pip install --proxy http://your.proxy:port -r requirements.txt" % python)
         return 1
     activate = ".venv\\Scripts\\activate" if os.name == "nt" else "source .venv/bin/activate"
-    print("\n%s\nDone. Now run these two lines:\n\n  %s\n  python3 setup.py\n%s"
-          % (RULE, activate, RULE))
+    print("\n%s\nDone. Now run these two lines:\n\n  %s\n  %s\n%s"
+          % (RULE, activate, again(), RULE))
     return 0
+
+
+def _dotenv_path():
+    return os.path.join(HERE, ".env")
+
+
+# A Console API key: classic (sk-ant-api03-), personal (sk-ant-usr-) or service
+# account (sk-ant-svc-). Admin keys and sign-in tokens (sk-ant-admin01-,
+# sk-ant-oat01-) are refused on purpose. Same rule as the build site's loader.
+KEY_SHAPE = re.compile(r"sk-ant-(?:api\d{2}|usr\d{0,2}|svc\d{0,2})-[A-Za-z0-9_\-]{16,}")
+
+
+def do_key():
+    """Save the key to Claude into .env without it ever appearing on screen.
+
+    The facilitator loads one key per cohort on the build site; a participant
+    copies it from the box "Your key to Claude" in Setting up, Part 3 (or
+    Menu -> Copy your key to Claude) and pastes it here, in their own terminal. getpass draws nothing, the
+    key is never echoed or printed (only its last four characters), and nothing
+    is written until git confirms .env is ignored, because a key in the repo is
+    the one mistake here that follows you home. (With no git on the machine
+    there is nothing to commit it with, so that case is let through.) Returns an
+    exit code, or None to carry on into the normal checks."""
+    code, _ = _git("check-ignore", "-q", ".env")
+    if code not in (0, 127):
+        print("\nNot saved. .env is not gitignored in this folder, so a key written there "
+              "could be pushed.\n  Run  python3 setup.py  first and fix the \u2717 lines "
+              "(this is the folder of your team repo clone), then try again.")
+        return 1
+    try:
+        raw = getpass.getpass("Paste your key to Claude (nothing will show as you paste), then press Enter: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nNothing saved.")
+        return 1
+    key = raw.strip()
+    if key.count("sk-ant-") > 1 or not KEY_SHAPE.fullmatch(key):
+        print("\nNot saved. That does not look like a key to Claude (it starts sk-ant-api, "
+              "sk-ant-usr or sk-ant-svc, and has no spaces).\n  Copy it again on the build site: " + SITE_KEY + ".\n"
+              "  Then run  python3 setup.py --key  again and paste once. An admin key or a "
+              "sign-in token is refused on purpose.")
+        return 1
+    path = _dotenv_path()
+    lines, replaced = [], False
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh.read().splitlines():
+                if line.strip().startswith("ANTHROPIC_API_KEY="):
+                    if not replaced:
+                        lines.append("ANTHROPIC_API_KEY=" + key)
+                    replaced = True
+                else:
+                    lines.append(line)
+    if not replaced:
+        lines.insert(0, "ANTHROPIC_API_KEY=" + key)
+    # Written beside it and swapped in, so a crash mid-write never leaves a
+    # half-file where the old .env was.
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    print("\nSaved to .env (key ending \u2026%s)%s." % (key[-4:], ", replacing the old line"
+                                                    if replaced else ""))
+    stale = os.environ.get("ANTHROPIC_API_KEY")
+    if stale is not None and stale != key:
+        print("\n  ! Your shell already has ANTHROPIC_API_KEY set, and that beats .env.\n"
+              "    Run  unset ANTHROPIC_API_KEY  and then  " + again() + "  again.")
+        return 1
+    return None
 
 
 def main():
@@ -364,16 +557,27 @@ def main():
                         help="create .venv and install dependencies")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--no-live", action="store_true", help="skip the live API call")
+    parser.add_argument("--day0", action="store_true",
+                        help="the laptop check before the session: no key, no team repo yet")
+    parser.add_argument("--key", action="store_true",
+                        help="paste your key to Claude from the build site into .env (never shown)")
     args = parser.parse_args()
+    global DAY0
+    DAY0 = args.day0
 
     if args.fix:
-        return do_fix()
+        return do_fix(day0=args.day0)
+    if args.key:
+        stopped = do_key()
+        if stopped is not None:
+            return stopped
 
-    checks = run_checks(live=not args.no_live)
+    checks = run_checks(live=not args.no_live and not args.day0, day0=args.day0)
     blocking = [c for c in checks if not c.ok and c.severity == "required"]
 
     if args.json:
         print(json.dumps({
+            "mode": "day0" if args.day0 else "full",
             "ready": not blocking,
             "blocking": len(blocking),
             "checks": [{"id": c.id, "ok": c.ok, "label": c.label, "fix": c.fix,
@@ -381,8 +585,8 @@ def main():
         }, indent=2))
         return 0 if not blocking else 1
 
-    print("\n%s\nLARKSPUR SETUP  ·  %s %s\n%s"
-          % (RULE, platform.system(), platform.release(), RULE))
+    print("\n%s\nLARKSPUR SETUP%s  ·  %s %s\n%s"
+          % (RULE, " · DAY 0 CHECK" if args.day0 else "", platform.system(), platform.release(), RULE))
     for c in checks:
         mark = "  ✓" if c.ok else ("  !" if c.severity == "advisory" else "  ✗")
         print("%s %s" % (mark, c.label))
@@ -392,12 +596,22 @@ def main():
 
     print("\n" + RULE)
     if not blocking:
-        print("READY. That is the whole setup.")
-        print("Next: python3 run.py K7PQ2M --trace")
+        looks = [c for c in checks if not c.ok and c.severity == "advisory"]
+        if args.day0:
+            print("READY for the session. Nothing else to do today.")
+            if looks:
+                print("%d optional item(s) above are worth a look if you plan to use them." % len(looks))
+            print("At the start you get your team repo and your key to Claude.")
+        elif args.no_live:
+            print("READY, apart from the live call to Claude, which you skipped.")
+            print("Once you have a key: python3 setup.py --key")
+        else:
+            print("READY. That is the whole setup.")
+            print("Next: python3 run.py K7PQ2M --trace")
         print(RULE)
         return 0
     print("BLOCKED on %d check(s). Fix the ✗ lines above, top to bottom." % len(blocking))
-    print("Then: python3 setup.py")
+    print("Then: " + again())
     print(RULE)
     return 1
 

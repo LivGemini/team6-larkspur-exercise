@@ -65,29 +65,30 @@ WORKSHOP = os.path.join(HERE, ".workshop")
 WEEKLY_VOLUME = 13_700
 HUMAN_COST = 6.90
 
-# Per-million-token prices for the model the exercise ships with. Cache reads
+# Per-million-token list prices by tier. The model is looked up, not pinned
+# (support/models.py), so prices follow the tier rather than one id. Cache reads
 # are cheaper than fresh input and cache writes cost a little more; that spread
 # is the entire economic argument for caching, so it is modelled rather than
-# ignored.
+# ignored. Check docs.claude.com/pricing before quoting a number to a client.
 PRICES = {
-    "claude-sonnet-5": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
+    "sonnet": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
+    "haiku": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
+    "opus": {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
 }
-DEFAULT_PRICE = PRICES["claude-sonnet-5"]
+DEFAULT_PRICE = PRICES["sonnet"]
 
 
 def price_for(model: str) -> dict:
-    if model in PRICES:
-        return PRICES[model]
-    for known, table in PRICES.items():
-        if model and (model.endswith(known) or known in model):
+    words = str(model or "").lower().split("-")
+    for tier, table in PRICES.items():
+        if tier in words:
             return table
-    # An unlisted model is priced at the shipped model's rates, which is wrong for
-    # anything a tier up. Say so on the report rather than print a quiet number.
+    # A model outside the three tiers is priced at Sonnet rates. Say so on the
+    # report rather than print a quiet number.
     if model and model not in _WARNED:
         _WARNED.add(model)
-        print("  [bench] no price table for %s: dollars below use %s rates. Add it to PRICES "
-              "in bench.py before you quote the cost." % (model, "claude-sonnet-5"))
+        print("  [bench] no price table for %s: dollars below use Sonnet rates. Add it to "
+              "PRICES in bench.py before you quote the cost." % model)
     return DEFAULT_PRICE
 
 
@@ -135,6 +136,7 @@ def run_one(agent, task) -> dict:
     """
     from support import DEFAULT_MESSAGE
     t0 = time.time()
+    access = None
     try:
         reply = agent.run_agent(
             task["pnr"], task["last_name"],
@@ -143,6 +145,10 @@ def run_one(agent, task) -> dict:
         error = None
     except Exception as exc:  # noqa: BLE001: a crashed shape is a measurement
         reply, error = "", "%s: %s" % (type(exc).__name__, exc)
+        # ...unless it never reached Claude. That is not a measurement of this
+        # agent, and main() refuses to bank a sweep that contains one.
+        from support.access import explain
+        access = explain(exc, "This bench")
 
     wall = time.time() - t0
     # support.LAST, put there by new_session(). Read out of sys.modules because
@@ -156,6 +162,7 @@ def run_one(agent, task) -> dict:
         "shape": task["shape"],
         "resolved": bool(reply) and error is None,
         "error": error,
+        "access": access,
         "wall": round(wall, 2),
         "turns": summary.get("turns", 0),
         "tool_calls": summary.get("tool_calls", 0),
@@ -428,6 +435,13 @@ def main() -> int:
             sys.stdout.write("  %s %-32s " % (task["pnr"], task["shape"]))
             sys.stdout.flush()
             row = run_one(agent, task)
+            if row["access"]:
+                # Stop before anything is written. A 'before' bench cannot be
+                # rebuilt once the lever has moved, so a sweep that never reached
+                # Claude must not be allowed to become one.
+                print("FAILED\n\n" + row["access"])
+                print("\n  Nothing saved: these numbers would not be this agent's.")
+                return 1
             rows.append(row)
             sys.stdout.write("%5.2fs  %d turns  %s\n"
                              % (row["wall"], row["turns"],

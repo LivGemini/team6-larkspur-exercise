@@ -75,6 +75,17 @@ def run_one(pnr: str, last_name: str, message: str, trace: bool, shape: str = ""
         # NOT truncated. This banner carries the API's whole message, because
         # the sentence that names what the API could not accept is usually the
         # second one, and the step above this says to read the error verbatim.
+        #
+        # Unless the run never reached Claude at all (no key, a refused key, no
+        # network). That is this seat's fault, not the conversation's, so it
+        # says so in plain words and stops: there is no turn to read, and the
+        # last trace on disk stays the last real one.
+        from support.access import explain
+        access = explain(exc, "This run")
+        if access:
+            print(f"\n{access}")
+            print("\n  This run did not finish, so there is no result to read.")
+            raise SystemExit(1)
         failure = f"{type(exc).__name__}: {exc}"
         print(f"\n[!!] {failure}")
 

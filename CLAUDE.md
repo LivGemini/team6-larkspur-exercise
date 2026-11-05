@@ -103,7 +103,7 @@ So:
    and in the desktop app, where most runs go through you and they never see the
    terminal.
 4. **Never edit the given files.** That is `support/`, `verify.py`, `setup.py`,
-   `pod_sync.py`, `readout.py`, `bench.py`, `eval_harness.py`, and never weaken
+   `pod_sync.py`, `review.py`, `readout.py`, `bench.py`, `eval_harness.py`, and never weaken
    `.gitignore` or `.gitattributes`. If a gate's check seems wrong, say so
    out loud. It is a workshop bug worth reporting, not something to route
    around. Do not weaken a check to make a step pass.
@@ -138,7 +138,8 @@ them apart by asking which build the room is on:
   first) and move on. Being present for the room's build beats owning every
   line of the last one.
 - **Start of Day 2.** Nobody rebuilds Day 1. Take the team's shipped canon,
-  prove it runs on this laptop (`setup.py` to READY, one `--trace`), read
+  prove it runs on this laptop (`setup.py` to READY, one `--trace`), run
+  `python3 review.py` (it brings the team's `FEEDBACK.md` down), read
   `python3 pod_sync.py --history` (every canon push carries the committer's
   note on what changed and why) and translate the missed builds into three
   sentences on the wire, then have them say back what the agent does and
@@ -190,9 +191,29 @@ goes on its own line at the end.
 - Keys live in `.env` (gitignored) or the environment. One key per person,
   never a team key. Never put a key in a file you would commit, and never echo a
   key back into the transcript.
+  The exception is the session key: the facilitator can load one key for the whole
+  cohort on the build site and release it when the session starts. A participant
+  copies it from the box **Your key to Claude** in Setting up, Part 3 on the build
+  site (or **Menu → Copy your key to Claude**; if the box says the key is not released
+  yet, they ask the facilitator) and runs `python3 setup.py --key` in their own
+  terminal (in VS Code: Terminal → New Terminal). It lands in `.env` exactly like a
+  personal key and is deleted at the end of the cohort. Never ask to see it, never
+  ask anyone to paste it into this chat (the chat is the transcript), and never run
+  that command for them or suggest `!` mode: the prompt hides what is pasted, and
+  neither your Bash tool nor `!` mode has a terminal to paste into. `.env` is denied
+  to you in `.claude/settings.json` on purpose; do not try to read it another way.
+- The team repo is public. A key in any committed file can be switched off within
+  minutes, for the whole room. `pod_sync.py --push-canon` refuses a push that carries
+  one; never help anyone get around that, and never put a key in `agent.py`.
+- When a gate, `run.py`, `bench.py` or `eval_harness.py` starts its message with
+  `[ACCESS]`, the fault is this laptop's key, token or network, not the agent. Do not
+  debug `agent.py` or the `messages` list for it; do what the message says.
 - No network means a raised hand and a teammate's screen. There is no offline
   mode in this pack, and building one on the clock is not the work.
 - Commands, by the moment they belong to:
+  - **Before the session (Day 0):** `python3 setup.py --day0`, in a clone of the practice
+    template. No key and no team repo needed; it checks Python, git, GitHub reach, Claude Code
+    and VS Code (optional) and ends in "READY for the session".
   - **Day one, before anything:** `python3 setup.py`, until it says READY.
   - **Every build:** `python3 run.py <PNR> --trace`, then
     `python3 verify.py <step>`. The steps are `1.2`, `1.3`, `1.4` (Build 1),
@@ -201,6 +222,12 @@ goes on its own line at the end.
     agreed on runs `python3 pod_sync.py --push-canon` (it asks for one line on
     what changed and why; `--note "..."` skips the prompt) and everyone else
     runs `python3 pod_sync.py --take-canon`.
+  - **Start of session two:** `python3 pod_sync.py --take-canon`, then
+    `python3 review.py`. Everyone runs it: the first run on a team makes
+    `FEEDBACK.md`, Larkspur's review of the team version, and sends it to the team
+    repo; every later run brings that same file down. It checks the key first.
+    Never write or edit `FEEDBACK.md` for them, and never pre-empt it: reading it
+    and answering it is the team's job.
   - **Behind:** `python3 pod_sync.py --history` shows every canon push with
     the committer's note; `/catchup` uses it.
   - **Next session:** `python3 bench.py --label before` / `--label after`

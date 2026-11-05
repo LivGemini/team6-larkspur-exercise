@@ -48,8 +48,8 @@ is why the judge here reports its own evidence: so you can tell those apart.
 THE JUDGE MODEL, and why it is not the agent's. Never let a model grade its own
 output. A judge on the same model id as the thing it is grading shares the
 blind spot that produced the answer: it reads its own phrasing as correct,
-because that is the phrasing it would have chosen. So JUDGE_MODEL defaults to
-claude-opus-4-8 while the agent runs on support/data.py's MODEL, a different
+because that is the phrasing it would have chosen. So JUDGE_MODEL is the newest
+Opus this key can use while the agent runs on the newest Sonnet, a different
 tier. Up rather than down, on purpose: a judge has to be able to catch a fluent
 answer that contradicts a tool result, and a cheaper judge than the agent is a
 grader you cannot appeal to. It costs more per case and it is slower, which is
@@ -79,7 +79,10 @@ WORKSHOP = os.path.join(HERE, ".workshop")
 CASES_PATH = os.path.join(HERE, "evals", "cases.json")
 EXAMPLE_PATH = os.path.join(HERE, "evals", "cases.example.json")
 
-JUDGE_MODEL = os.environ.get("LARKSPUR_JUDGE_MODEL", "claude-opus-4-8")
+from support.models import latest  # noqa: E402
+
+# The newest Opus this key can use (support/models.py); LARKSPUR_JUDGE_MODEL wins.
+JUDGE_MODEL = latest("opus", "LARKSPUR_JUDGE_MODEL")
 RUBRIC_VERSION = "v2"   # v1 over-specified grnd-0101; see evals/GRADER-BUG.md
 
 VERDICT_SCHEMA = {
@@ -206,6 +209,11 @@ JUDGE_JSON_NUDGE = (
 )
 
 
+class AccessStop(Exception):
+    """The run cannot continue because Claude could not be reached. Carries the
+    plain-language text; main() prints it and saves nothing."""
+
+
 def grade_judge(spec, transcript, case, client) -> dict:
     """One judge call, and one retry if the reply will not parse.
 
@@ -235,7 +243,16 @@ def grade_judge(spec, transcript, case, client) -> dict:
                 messages=[{"role": "user", "content": ask}],
             )
         except Exception as exc:  # noqa: BLE001: a judge that errors is UNKNOWN, not PASS
-            # A call that never returned is left on the contract's own terms:
+            # A judge that could not be REACHED (this key cannot use the judge
+            # model, a refused key, a rate limit that outlasted the retries) is
+            # not a grading result at all. Saved as UNKNOWN it would still count
+            # as a run that covered the cases, so it stops the run instead.
+            from support.access import explain
+            access = explain(exc, "The judge call")
+            if access:
+                raise AccessStop(access + "\n  (The grader's judge model is %s; the key has "
+                                 "to be allowed to use it.)" % JUDGE_MODEL) from exc
+            # Anything else is left on the contract's own terms:
             # UNKNOWN, counted as a failure, with the exception named so a
             # facilitator can tell a rate limit from a bad model id.
             return {"grader": "judge", "verdict": "UNKNOWN", "evidence": [],
@@ -276,17 +293,21 @@ def load_agent():
 
 def run_case(agent, case) -> dict:
     t0 = time.time()
+    access = None
     try:
         reply = agent.run_agent(case["pnr"], case["last_name"], case["message"])
         error = None
     except Exception as exc:  # noqa: BLE001
         reply, error = "", "%s: %s" % (type(exc).__name__, exc)
+        from support.access import explain
+        access = explain(exc, "This eval run")
     # support.LAST, put there by new_session(). Read out of sys.modules because
     # load_agent() above purges and re-imports the package.
     tracer = getattr(getattr(sys.modules.get("support"), "LAST", None), "tracer", None)
     return {
         "reply": reply,
         "error": error,
+        "access": access,
         "tool_names": tracer.tool_names if tracer else [],
         # name + input + a truncated result summary per call. The judge reads
         # this; grade_rules only ever needs the names above.
@@ -472,7 +493,20 @@ def main() -> int:
         sys.stdout.write("  %-14s %-13s " % (case["id"], case.get("suite", "-")))
         sys.stdout.flush()
         transcript = run_case(agent, case)
-        result = grade_case(case, transcript, client)
+        if transcript["access"]:
+            # The run never reached Claude, so there is nothing to grade and
+            # nothing to save: gate 3.1 reads .workshop/evals.json as a run that
+            # happened, and a file of failures that never ran would pass it.
+            print("FAILED\n\n" + transcript["access"])
+            print("\n  Nothing saved: no case was actually run.")
+            return 1
+        try:
+            result = grade_case(case, transcript, client)
+        except AccessStop as stop:
+            print("FAILED\n\n" + str(stop))
+            print("\n  Nothing saved: the grader could not run, and a file of ungraded "
+                  "cases would pass for a run.")
+            return 1
         result["transcript"] = transcript
         results.append(result)
         sys.stdout.write("%s  (%.1fs)\n"

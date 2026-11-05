@@ -378,6 +378,43 @@ def push_with_retry(ref, attempts=3):
     return False, "gave up after three attempts", "rejected"
 
 
+def key_guard(ref):
+    """None when nothing key-shaped would leave this laptop. Otherwise the
+    lines for fail(): which file and line, why it matters, how to fix it. The
+    key itself is never printed, only its last four characters."""
+    from support import keyscan
+    in_staged = keyscan.staged(HERE)
+    in_commits = keyscan.outgoing(HERE)
+    if in_staged is None or in_commits is None:
+        return ("Stopped. Nothing was committed or pushed.",
+                "git could not show what would be pushed, so this command could not check",
+                "it for a key to Claude. Run  git status  and fix what it reports, then run",
+                "  python3 pod_sync.py --push-canon",
+                "again. Still stuck? Tell your facilitator.")
+    hits = in_staged + in_commits
+    if not hits:
+        return None
+    lines = ["Stopped. Nothing was committed or pushed.",
+             "A key to Claude is in what would go to the team repo:"]
+    lines += ["  " + keyscan.where(h) for h in hits[:10]]
+    if len(hits) > 10:
+        lines.append("  ... and %d more" % (len(hits) - 10))
+    lines += [""] + keyscan.WHY.splitlines() + ["", "To fix it:"]
+    step = 1
+    if in_commits:
+        lines += ["  %d. The key is in a commit you made on this laptop. Undo your commits here" % step,
+                  "     and keep all your files as they are:",
+                  "       git reset --soft %s" % ref]
+        step += 1
+    lines += ["  %d. Open the file and delete the key. The key belongs only in .env, which" % step,
+              "     is never pushed. Your code does not need it in the file: the kit reads",
+              "     .env for you.",
+              "  %d. Run the same command again:  python3 pod_sync.py --push-canon" % (step + 1),
+              "Was this key already pushed, from this laptop or another one? Tell your",
+              "facilitator now, so the key can be changed for the room."]
+    return tuple(lines)
+
+
 def regenerate_readout():
     """The readout is half the submission, and a stale one is worse than none:
     it shows the agent as it was two blocks ago."""
@@ -506,6 +543,13 @@ def cmd_push_canon(args):
         print("\n  Nothing changed: what you have is already the team's canon.")
         print(RULE)
         return 0
+
+    # Last look before anything is committed: no key to Claude may go out, in
+    # the files staged now or in a commit made here earlier that a push would send.
+    refused = key_guard(ref)
+    if refused:
+        git("reset", "-q", "--", *present)   # unstage; the files themselves are untouched
+        return fail(*refused)
 
     author = git_out("config", "user.name") or "unknown"
     # The subject line is what gate_of() and the status board read; keep it.

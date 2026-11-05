@@ -73,8 +73,8 @@ their own account, **Public**. Before the URL goes anywhere: **Settings**,
 **Collaborators**, **Add people** for every teammate by GitHub username, plus
 your facilitator's GitHub handle, which is in the chat. Anyone can read a
 public repo, but only a collaborator can push to it: an uninvited teammate cannot
-publish the canon, and an uninvited reviewer cannot leave the overnight review in
-your repo. Then they post the repo URL in the team chat
+publish the canon, and your facilitator can only fix your repo for you if
+you invited them. Then they post the repo URL in the team chat
 with the line `invites sent`, and nobody else does anything until it is there.
 Save that URL on the site too: **Menu**, then **Your team's repository**.
 The template itself is never your team's repo: save the URL of the repo you
