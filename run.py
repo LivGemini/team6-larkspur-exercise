@@ -47,7 +47,14 @@ def _last_name_for(pnr: str):
     for task in STAGE1_TASKS:
         if task["pnr"] == pnr:
             return task["last_name"]
-    return None
+    # Any other PNR in the data pack (H4MC7Y and the rest of the fixture index):
+    # take the lead passenger's name from the booking, so --last-name is only
+    # needed for a PNR that is not in the pack at all.
+    try:
+        from support import mock_backend
+        return mock_backend.get_booking_raw(pnr)["passengers"][0]["last_name"]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def run_one(pnr: str, last_name: str, message: str, trace: bool, shape: str = "",
@@ -367,7 +374,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("pnr", nargs="?", help="PNR to run, e.g. K7PQ2M")
-    parser.add_argument("--last-name", help="required if pnr isn't one of the Stage 1 tasks")
+    parser.add_argument("--last-name", help="only needed for a PNR that is not in the data pack")
     parser.add_argument("--message", default=DEFAULT_MESSAGE)
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true",

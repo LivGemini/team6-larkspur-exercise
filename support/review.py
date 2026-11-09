@@ -979,12 +979,20 @@ def ask_for_observations(client, build: dict, model: str) -> list:
         # response comes back as ONE thinking block, zero text — stop_reason
         # max_tokens, nothing to parse (first live-repo run, Sep 3 2026). A
         # structured-output review doesn't need it; the budget buys observations.
-        response = client.messages.create(
+        kwargs = dict(
             model=model, max_tokens=4000, system=SYSTEM_PROMPT,
-            thinking={"type": "disabled"},
             output_config={"format": {"type": "json_schema", "schema": OBS_SCHEMA}},
             messages=[{"role": "user", "content": prompt}],
         )
+        # Newer models refuse {"type": "disabled"} and say to send
+        # {"type": "between_tools"} instead (claude-sonnet-5-5, Nov 9 2026); older
+        # ones only know "disabled". Try one, and switch on that exact 400.
+        try:
+            response = client.messages.create(thinking={"type": "disabled"}, **kwargs)
+        except Exception as first:  # noqa: BLE001
+            if "between_tools" not in str(first):
+                raise
+            response = client.messages.create(thinking={"type": "between_tools"}, **kwargs)
     except Exception as exc:  # noqa: BLE001, one repo's failure is not the batch's
         raise ReviewFailed(credential_hint(exc))
 

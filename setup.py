@@ -356,6 +356,8 @@ NO_CREDENTIAL = (
     "          in Setting up, Part 3, or Menu \u2192 Copy your key to Claude. Then run this\n"
     "          in your own terminal and paste the key (nothing shows as you paste):\n"
     "            python3 setup.py --key\n"
+    "          Windows: Ctrl+V may not paste there. Right-click to paste, or save the key in a\n"
+    "          text file outside this folder and run  python setup.py --key-file C:\\path\\key.txt\n"
     "          If the box says the key is not released yet, ask your facilitator.\n"
     "       2. Already sign in to Claude? Use that, no API key needed:\n"
     "            brew install anthropics/tap/ant   (or see docs.claude.com for "
@@ -488,7 +490,24 @@ def _dotenv_path():
 KEY_SHAPE = re.compile(r"sk-ant-(?:api\d{2}|usr\d{0,2}|svc\d{0,2})-[A-Za-z0-9_\-]{16,}")
 
 
-def do_key():
+def _read_key(key_file=None):
+    """The key as typed, pasted or read from a file.
+
+    --key-file: a text file holding only the key (keep it outside the repo and delete
+    it afterwards). Windows: getpass reads raw keystrokes there, so Ctrl+V and
+    Shift+Insert paste nothing into it. Use a plain prompt instead, where the key
+    does show for a moment; a right-click or Ctrl+V works in it the normal way."""
+    if key_file:
+        with open(os.path.expanduser(key_file), encoding="utf-8-sig", errors="replace") as fh:
+            return fh.read()
+    if os.name == "nt":
+        print("\nOn Windows the key shows on screen as you paste it. Paste (Ctrl+V or right-click), "
+              "press Enter, then clear the window.")
+        return input("Paste your key to Claude, then press Enter: ")
+    return getpass.getpass("Paste your key to Claude (nothing will show as you paste), then press Enter: ")
+
+
+def do_key(key_file=None):
     """Save the key to Claude into .env without it ever appearing on screen.
 
     The facilitator loads one key per cohort on the build site; a participant
@@ -506,9 +525,12 @@ def do_key():
               "(this is the folder of your team repo clone), then try again.")
         return 1
     try:
-        raw = getpass.getpass("Paste your key to Claude (nothing will show as you paste), then press Enter: ")
+        raw = _read_key(key_file)
     except (EOFError, KeyboardInterrupt):
         print("\nNothing saved.")
+        return 1
+    except OSError as exc:
+        print("\nNot saved. Could not read %s (%s)." % (key_file, exc.strerror or exc))
         return 1
     key = raw.strip()
     if key.count("sk-ant-") > 1 or not KEY_SHAPE.fullmatch(key):
@@ -559,6 +581,8 @@ def main():
     parser.add_argument("--no-live", action="store_true", help="skip the live API call")
     parser.add_argument("--day0", action="store_true",
                         help="the laptop check before the session: no key, no team repo yet")
+    parser.add_argument("--key-file", metavar="PATH",
+                        help="like --key, but read the key from a text file (no pasting into the terminal)")
     parser.add_argument("--key", action="store_true",
                         help="paste your key to Claude from the build site into .env (never shown)")
     args = parser.parse_args()
@@ -567,8 +591,8 @@ def main():
 
     if args.fix:
         return do_fix(day0=args.day0)
-    if args.key:
-        stopped = do_key()
+    if args.key or args.key_file:
+        stopped = do_key(args.key_file)
         if stopped is not None:
             return stopped
 
