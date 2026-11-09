@@ -63,14 +63,14 @@
       "original_sched_arr_local": "22:00",
       "context_note": "LK111 pre-cancelled 13:55 CDT (no serviceable spare at BNA). It was the last BNA-DEN of the day. as_of is 15:08 CDT. Passenger is Summit, First, home DEN, currently in Nashville: if nothing tonight, overnight=true and cause MX makes hotel eligible (propose, human one-click).",
       "options": [
-        {"option_id": "OPT-LK109-0508-J", "rank": 1, "flights": ["LK109"], "date": "2025-05-08", "dep_local": "17:50", "arr_local": "19:35", "sched_dep_local": "16:20", "sched_arr_local": "18:05", "status": "DELAYED", "delay_min": 90, "stops": 0, "cabin": "J", "seats_available": 2, "operated_by": "Larkspur Airlines", "arrival_vs_original_min": -145, "fare_difference_usd": 0, "rationale": "Gets her home tonight, earlier than originally booked. Departs in 2h42m from as_of; confirm she can reach BNA. Delay driven by DEN recovery metering and may extend."},
-        {"option_id": "OPT-LK101-0509-J", "rank": 2, "flights": ["LK101"], "date": "2025-05-09", "dep_local": "07:00", "arr_local": "08:45", "sched_dep_local": "07:00", "sched_arr_local": "08:45", "status": "ON_TIME", "delay_min": 0, "stops": 0, "cabin": "J", "seats_available": 3, "operated_by": "Larkspur Airlines", "arrival_vs_original_min": 645, "fare_difference_usd": 0, "rationale": "First flight tomorrow in First. Triggers overnight care under CTL-CXL: hotel proposal up to $175 for human approval, $40 ground auto, $25 meal auto, goodwill cap $200 human-approve."}
+        {"option_id": "OPT-LK101-0509-J", "rank": 1, "flights": ["LK101"], "date": "2025-05-09", "dep_local": "07:00", "arr_local": "08:45", "sched_dep_local": "07:00", "sched_arr_local": "08:45", "status": "ON_TIME", "delay_min": 0, "stops": 0, "cabin": "J", "seats_available": 3, "operated_by": "Larkspur Airlines", "arrival_vs_original_min": 645, "fare_difference_usd": 0, "rationale": "First flight tomorrow in First. Triggers overnight care under CTL-CXL: hotel proposal up to $175 for human approval, $40 ground auto, $25 meal auto, goodwill cap $200 human-approve."}
       ],
       "other_cabin_options": [
         {"option_id": "OPT-LK101-0509-Y", "flights": ["LK101"], "date": "2025-05-09", "dep_local": "07:00", "arr_local": "08:45", "stops": 0, "cabin": "Y", "seats_available": 12, "operated_by": "Larkspur Airlines", "note": "Lower cabin. Only at customer request; cabin-difference refund is a human step (ESC-07)."}
       ],
       "excluded": [
-        {"flight_no": "LK105", "date": "2025-05-08", "reason": "est dep 15:15 CDT, inside 30-min cutoff from as_of, and J0"}
+        {"flight_no": "LK105", "date": "2025-05-08", "reason": "est dep 15:15 CDT, inside 30-min cutoff from as_of, and J0"},
+        {"flight_no": "LK109", "date": "2025-05-08", "reason": "J0, no First seats left on the 17:50 estimated departure"}
       ]
     },
     "DEN-BOI|2025-05-08|Y": {
