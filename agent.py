@@ -58,33 +58,6 @@ def ground_stop_status(airport: str) -> Dict[str, Any]:
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
 EXTRA_TOOLS: List[Dict[str, Any]] = [   # ✏️ Build 2, step 2.1: schemas for the tools you add
     {
-        "name": "next_available_day",
-        "description": (
-            "Finds the earliest date with an open seat on a route, searching forward "
-            "from a given date. Use it when the customer asks 'what is the soonest day "
-            "I can fly' or when search_alternatives finds nothing on the original day "
-            "and you need to know how far out the next availability is. Answers for "
-            "ONE passenger only, so do not use it to confirm space for a group or "
-            "party. Returns a single date, not flight times or fares; use "
-            "search_alternatives for those once you have the date."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "origin": {"type": "string",
-                           "description": "Three-letter origin airport code, e.g. DEN."},
-                "dest": {"type": "string",
-                         "description": "Three-letter destination airport code, e.g. BOI."},
-                "date": {"type": "string",
-                         "description": "Date to search forward from, YYYY-MM-DD "
-                                        "(usually the original flight date)."},
-                "cabin": {"type": "string",
-                          "description": "Y for main cabin (default) or J for first."},
-            },
-            "required": ["origin", "dest", "date"],
-        },
-    },
-    {
         "name": "ground_stop_status",
         "description": (
             "Tells you whether an airport is under an FAA ground stop right now, and "
@@ -105,8 +78,7 @@ EXTRA_TOOLS: List[Dict[str, Any]] = [   # ✏️ Build 2, step 2.1: schemas for 
         },
     },
 ]
-LOCAL_TOOLS: Dict[str, Any] = {"next_available_day": next_available_day,
-                               "ground_stop_status": ground_stop_status}   # ✏️ Build 2, step 2.1: the functions behind them
+LOCAL_TOOLS: Dict[str, Any] = {"ground_stop_status": ground_stop_status}   # ✏️ Build 2, step 2.1: the functions behind them
 
 
 def text_of(response) -> str:
@@ -169,7 +141,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏�
 def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
     """Given. Exactly what Claude is offered on every turn; run.py --show-tools
     prints this list."""
-    return build_tools() + EXTRA_TOOLS
+    return build_tools() + EXTRA_TOOLS + mcp_client.tools()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
