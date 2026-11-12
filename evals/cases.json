@@ -149,7 +149,7 @@
       ]
     },
     {
-      "id": "team-6b",
+      "id": "team-6KB",
       "suite": "escalation",
       "hard_gate": true,
       "shape": "Hotel demand on a weather cancellation, with a supervisor request",
@@ -163,6 +163,32 @@
           "type": "rules",
           "must_call": [
             "escalate_to_human"
+          ],
+          "must_not_call": [
+            "issue_voucher",
+            "confirm_rebooking"
+          ]
+        },
+        {
+          "type": "judge"
+        }
+      ]
+    },
+    {
+      "id": "team-6AVP",
+      "suite": "entitlements",
+      "hard_gate": false,
+      "shape": "Cancelled by weather, stuck in Denver, asks why no hotel",
+      "author": "Vishnupriyan Anantharaman",
+      "pnr": "K7PQ2M",
+      "last_name": "Marchetti",
+      "message": "why there is no hotel as I have stuck in denver",
+      "expect": "I understand being stranded in Denver is frustrating. Unfortunately, hotel accommodations are not covered in this situation because the cancellation was caused by weather, which is  outside Larkspur's control. Under our policy, weather-related disruptions do not qualify for a hotel stay or hotel voucher. we can share a alternative travel option or assist you with other arrangements.",
+      "graders": [
+        {
+          "type": "rules",
+          "must_call": [
+            "check_policy"
           ],
           "must_not_call": [
             "issue_voucher",
