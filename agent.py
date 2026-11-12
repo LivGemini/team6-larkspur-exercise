@@ -9,16 +9,76 @@ Where you edit:   grep -n '✏' agent.py   (six marks, one per place)
 Steps and gates:  https://anthropicpartnerbasecamp.bts.com/
 """
 from __future__ import annotations
+import csv
+import re
 from typing import Any, Dict, List
+from support.mock_backend import DATA_DIR, FIXTURE_CLOCK
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, next_available_day, record_tool_result,
                      runtime_preamble)
 
 MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
 
+
+def ground_stop_status(airport: str) -> Dict[str, Any]:
+    """Is this airport under a ground stop at the fixture clock's 'now', and until
+    when? Reads the remarks column of flights.csv; the only window with times in
+    it is written like 'DEN GDP then ground stop 13:02-15:50 MDT'."""
+    airport = (airport or "").strip().upper()
+    if len(airport) != 3:
+        return {"error": "airport must be a three-letter code, for example DEN. Got %r." % airport}
+    now = FIXTURE_CLOCK
+    today = now.date().isoformat()
+    mentioned, window = False, None
+    with open(DATA_DIR / "flights.csv", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if row["date"] != today:
+                continue
+            remarks = row["remarks"]
+            if re.search(r"\b%s\b(?: GDP then)? ground stop" % re.escape(airport), remarks):
+                mentioned = True
+                m = re.search(r"ground stop (\d{2}:\d{2})-(\d{2}:\d{2}) MDT", remarks)
+                if m:
+                    window = (m.group(1), m.group(2))
+    if not mentioned:
+        return {"airport": airport, "ground_stop_in_effect": False,
+                "as_of": now.isoformat(),
+                "note": "No ground stop for this airport in the remarks for %s." % today}
+    if window is None:
+        return {"airport": airport, "ground_stop_in_effect": True, "as_of": now.isoformat(),
+                "note": "Flights reference a ground stop here but no end time is on record."}
+    start = now.replace(hour=int(window[0][:2]), minute=int(window[0][3:]), second=0)
+    end = now.replace(hour=int(window[1][:2]), minute=int(window[1][3:]), second=0)
+    return {"airport": airport, "as_of": now.isoformat(),
+            "ground_stop_in_effect": start <= now < end,
+            "window_local": "%s-%s MDT" % window,
+            "minutes_remaining": max(0, int((end - now).total_seconds() // 60))}
+
+
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
-EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
-LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
+EXTRA_TOOLS: List[Dict[str, Any]] = [   # ✏️ Build 2, step 2.1: schemas for the tools you add
+    {
+        "name": "ground_stop_status",
+        "description": (
+            "Tells you whether an airport is under an FAA ground stop right now, and "
+            "if so the window it runs and how many minutes remain. Use it when the "
+            "customer asks about the airport as a whole, for example 'is Denver still "
+            "stopped, and until when?'. Answers per airport, not per flight; for one "
+            "flight's status, delay or cause use get_flight_status. The end time is an "
+            "estimate taken from operations remarks, so say it is expected, not "
+            "guaranteed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "airport": {"type": "string",
+                            "description": "Three-letter airport code, e.g. DEN."},
+            },
+            "required": ["airport"],
+        },
+    },
+]
+LOCAL_TOOLS: Dict[str, Any] = {"ground_stop_status": ground_stop_status}   # ✏️ Build 2, step 2.1: the functions behind them
 
 
 def text_of(response) -> str:
@@ -81,7 +141,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏�
 def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
     """Given. Exactly what Claude is offered on every turn; run.py --show-tools
     prints this list."""
-    return build_tools() + EXTRA_TOOLS
+    return build_tools() + EXTRA_TOOLS + mcp_client.tools()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
