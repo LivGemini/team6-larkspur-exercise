@@ -8,11 +8,11 @@ Number: About 21,000 input tokens and 5 tool calls for one traced conversation, 
 Safety check: Not in place yet. An abusive message currently gets the same calm, standard handling as any other, and we will write and test explicit tone guidance before any live use.
 Next: Add tone guidance for abusive customers, build evaluation cases from realistic disruption scenarios, and agree with Larkspur who owns the agent.
 Still broken: Abusive customers are not handled differently, we have no evaluation cases of our own yet, and ground-stop end times are estimates, so the agent says "expected", not "guaranteed".
-Lever: <cost | speed | intelligence>
+Lever: cost
 
 ## Priya asked
 
-Costs: About 21,000 input tokens per conversation on our measured run; a price per conversation is still to be calculated.
-Wrong: TEAM TO WRITE. How a wrong rebooking or voucher is caught and corrected.
-Runs it: TEAM TO WRITE. Who at Larkspur owns and monitors the agent.
-Left out: Abusive-customer handling for now. TEAM TO ADD anything else deliberately out of scope.
+Costs: About 21,000 input tokens per conversation on our measured run, and the cost lever targets exactly this: every tool definition is sent on every turn, so trimming what we send is where savings come from. A price per conversation is still to be calculated.
+Wrong: The agent hands the customer to a colleague when it is unsure, and a wrong rebooking or voucher is caught by the confirmation message the customer receives. We propose a human review of a sample of conversations; Larkspur to confirm the process.
+Runs it: Proposed: a Larkspur customer-care operations owner monitors conversations and the escalation queue, with our team supporting the agent. Larkspur to confirm who.
+Left out: Abusive-customer handling for now, plus anything outside the five ticket types, payments and refunds, and live customer use until evaluation cases pass.
