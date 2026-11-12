@@ -129,7 +129,12 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
             "description": (
                 "Find eligible rebooking alternatives for a disrupted booking. "
                 "Use when a customer wants to change or recover a trip. "
-                "Returns alternative flight options that may be held with hold_seat."
+                "Returns alternative flight options that may be held with hold_seat. "
+                "Seat counts are for the passengers on this PNR only (see passenger_count "
+                "in the result). If the customer says others are travelling with them who "
+                "are not on this booking, those seats were NOT checked: never say the "
+                "flight fits the whole party, say availability is unconfirmed for them and "
+                "ask for their PNRs or escalate_to_human."
             ),
             "input_schema": {
                 "type": "object",
